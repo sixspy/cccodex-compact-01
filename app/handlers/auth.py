@@ -2,6 +2,7 @@ import tornado.web
 
 from app.config import Config
 from app.handlers.base import BaseHandler, serializer
+from app.services import rulers
 from app.services.errors import ServiceError
 
 
@@ -51,4 +52,12 @@ class ApiLogout(BaseHandler):
 class ApiMeta(BaseHandler):
     def get(self):
         self.require_user()
-        self.json({"lab": Config.LAB_NAME, "product": "cc-compact-lab"})
+        source = rulers.active_ruler_source()
+        self.json(
+            {
+                "lab": Config.LAB_NAME,
+                "product": "cc-compact-lab",
+                "ruler_source": source,
+                "ruler_source_label": rulers.source_label(source),
+            }
+        )

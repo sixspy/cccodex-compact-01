@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.db import get_db
+from app.services import rulers
 from app.services.errors import ServiceError
 
 
@@ -12,6 +13,31 @@ def list_jobs(db_path: str | None = None) -> list[dict]:
             "JOIN compact_plans p ON p.id=j.plan_id ORDER BY j.id DESC"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def _resolve_published_ruler(conn, plan: dict, db_path: str | None) -> dict:
+    """合并落库前的标尺同源闸门：缺标尺/跨源/挂载漂移一律中文拦截。"""
+    ruler = rulers.load_ruler(conn, plan, db_path=db_path)
+    # 挂载目录与标尺须同源：挂载目录必须与冻结标尺一致，拧了就拦合并落库
+    expect_mount = rulers.mount_dir_for(plan["target_table"])
+    if ruler["mount_dir"] != expect_mount:
+        raise ServiceError(
+            f"挂载目录与标尺不同源：标尺锁定 {ruler['mount_dir']}，"
+            f"当前挂载 {expect_mount}，已拦截合并落库"
+        )
+    # 发布后挂载若又被改动（再挂/撤文件），指纹与总字节会漂移
+    current = rulers.current_mount_fingerprint(conn, plan)
+    if current["mount_fingerprint"] != ruler["mount_fingerprint"]:
+        raise ServiceError(
+            "挂载指纹与冻结标尺不一致（挂载目录在发布后发生变动），"
+            f"标尺 {ruler['total_bytes']} 字节 / 现挂载 {current['total_bytes']} 字节，"
+            "已拦截合并落库"
+        )
+    if current["total_bytes"] != int(ruler["total_bytes"]):
+        raise ServiceError(
+            "挂载总字节与冻结标尺不一致，已拦截合并落库"
+        )
+    return ruler
 
 
 def start_rewrite(plan_id: int, db_path: str | None = None) -> dict:
@@ -29,6 +55,8 @@ def start_rewrite(plan_id: int, db_path: str | None = None) -> dict:
         ).fetchone()
         if running:
             raise ServiceError("已有在途合并任务", 409)
+        plan_dict = dict(plan)
+        ruler = _resolve_published_ruler(conn, plan_dict, db_path)
         items = conn.execute(
             "SELECT f.* FROM plan_items i JOIN lake_files f ON f.id=i.file_id "
             "WHERE i.plan_id=? AND f.status='已入计划'",
@@ -37,16 +65,22 @@ def start_rewrite(plan_id: int, db_path: str | None = None) -> dict:
         if not items:
             raise ServiceError("计划下无可合并碎文件", 409)
         total = sum(int(x["size_bytes"]) for x in items)
+        if total != int(ruler["total_bytes"]):
+            raise ServiceError(
+                f"合并体积 {total} 字节与标尺冻结总字节 {ruler['total_bytes']} 不一致，"
+                "已拦截合并落库"
+            )
         cur = conn.execute(
-            "INSERT INTO rewrite_jobs(plan_id, status, merged_bytes, message, started_at) "
-            "VALUES (?, '执行中', 0, '合并进行中', datetime('now'))",
-            (plan_id,),
+            "INSERT INTO rewrite_jobs(plan_id, status, merged_bytes, ruler_source, "
+            "ruler_bytes, message, started_at) "
+            "VALUES (?, '执行中', 0, ?, ?, '合并进行中', datetime('now'))",
+            (plan_id, ruler["ruler_source"], int(ruler["total_bytes"])),
         )
         job_id = cur.lastrowid
         conn.execute(
             "UPDATE compact_plans SET status='执行中' WHERE id=?", (plan_id,)
         )
-        # baseline: synchronous success path (出题可改失败半态)
+        # 同步成功路径：合并字节严格取自同源冻结标尺
         for row in items:
             conn.execute(
                 "UPDATE lake_files SET status='已合并' WHERE id=?", (row["id"],)
@@ -54,7 +88,11 @@ def start_rewrite(plan_id: int, db_path: str | None = None) -> dict:
         conn.execute(
             "UPDATE rewrite_jobs SET status='成功', merged_bytes=?, message=?, "
             "finished_at=datetime('now') WHERE id=?",
-            (total, f"已合并 {len(items)} 个碎文件", job_id),
+            (
+                int(ruler["total_bytes"]),
+                f"已合并 {len(items)} 个碎文件（标尺：{ruler['ruler_source_label']}）",
+                job_id,
+            ),
         )
         conn.execute(
             "UPDATE compact_plans SET status='已完成' WHERE id=?", (plan_id,)

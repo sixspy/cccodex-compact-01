@@ -4,7 +4,7 @@ from __future__ import annotations
 from app.db import SCHEMA, get_db, init_schema
 
 
-SCHEMA_VERSION = "compact-v2"
+SCHEMA_VERSION = "compact-v3"
 
 
 def _schema_compatible(conn) -> bool:
@@ -28,6 +28,7 @@ def seed_if_needed(db_path: str | None = None) -> dict:
         ).fetchone()
         if not _schema_compatible(conn) or (ver and ver["value"] != SCHEMA_VERSION):
             for table in (
+                "volume_ruler_vouchers",
                 "volume_reports",
                 "rewrite_jobs",
                 "plan_items",
@@ -76,7 +77,8 @@ def seed_if_needed(db_path: str | None = None) -> dict:
             "INSERT INTO lab_settings(key, value, label) VALUES "
             "('compact_threshold_kb','256','碎文件阈值(KB)'),"
             "('rewrite_parallel','1','合并并发度'),"
-            "('reconcile_mode','严格','对账模式')"
+            "('reconcile_mode','严格','对账模式'),"
+            "('volume_ruler_source','ledger_voucher','体积标尺来源')"
         )
         conn.execute("INSERT INTO meta(key, value) VALUES ('seeded','1')")
         conn.execute(
@@ -96,6 +98,7 @@ def reset_seed(db_path: str | None = None) -> None:
     init_schema(db_path)
     with get_db(db_path) as conn:
         for table in (
+            "volume_ruler_vouchers",
             "volume_reports",
             "rewrite_jobs",
             "plan_items",

@@ -16,7 +16,8 @@ export async function renderFiles(view, setMsg) {
     <section class="wall" style="margin-top:1rem">
       ${(j.stats || []).map(s => `<article class="card"><h3>${s.table_name}</h3>
         <p>文件 ${s.file_count} · 碎文件 ${s.loose_count}</p>
-        <p class="muted">${s.total_bytes} 字节</p></article>`).join('')}
+        <p class="muted">${s.total_bytes} 字节</p>
+        <p class="chip">挂载目录 lake/${s.table_name}（与体积标尺同源）</p></article>`).join('')}
     </section>
     <section class="wall" style="margin-top:1rem">
       ${(j.items || []).map(f => `<article class="card">

@@ -30,3 +30,13 @@ label { display:grid; gap:.3rem; font-size:.9rem; color:var(--muted); }
 input, select { width:100%; padding:.5rem .6rem; border-radius:8px; border:1px solid var(--line); background:#0f1522; color:var(--text); }
 h1,h2,h3 { margin:.2rem 0 .6rem; }
 .row { display:flex; gap:.6rem; flex-wrap:wrap; align-items:end; }
+.chip { display:inline-flex; align-items:center; gap:.35rem; padding:.2rem .6rem; border-radius:999px; font-size:.8rem; border:1px solid var(--line); background:#182033; color:var(--muted); }
+.chip.snap { border-color:#7c6bff; color:#b7acff; background:#241f47; }
+.chip.ledger { border-color:var(--ok); color:var(--ok); background:#12352a; }
+.chip.draft { border-style:dashed; color:var(--warn); }
+.chip.off { color:#ff8f8f; border-color:#7a3a3a; }
+.chip.ok { color:var(--ok); border-color:var(--ok); }
+.kv { display:grid; gap:.25rem; font-size:.88rem; }
+.kv code { color:var(--accent); word-break:break-all; }
+.badge-ok { color:var(--ok); font-weight:600; }
+.badge-bad { color:#ff8f8f; font-weight:600; }

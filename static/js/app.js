@@ -50,6 +50,10 @@ document.getElementById('btn-logout').onclick = async () => {
 
 api('/api/meta').then(j => {
   document.getElementById('lab-name').textContent = j.lab || '湖表压实台';
+  const chip = document.getElementById('ruler-chip');
+  const src = j.ruler_source || '';
+  chip.textContent = '当前标尺：' + (j.ruler_source_label || src || '未知');
+  chip.classList.add(src === 'snapshot_file' ? 'snap' : 'ledger');
 }).catch(() => {});
 
 show('files');

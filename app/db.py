@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS compact_plans (
   status TEXT NOT NULL CHECK (status IN ('草稿','已发布','执行中','已完成','已作废')),
   target_table TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
+  ruler_source TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -36,6 +37,8 @@ CREATE TABLE IF NOT EXISTS rewrite_jobs (
   plan_id INTEGER NOT NULL REFERENCES compact_plans(id),
   status TEXT NOT NULL CHECK (status IN ('待执行','执行中','成功','失败')),
   merged_bytes INTEGER NOT NULL DEFAULT 0,
+  ruler_source TEXT NOT NULL DEFAULT '',
+  ruler_bytes INTEGER NOT NULL DEFAULT 0,
   message TEXT NOT NULL DEFAULT '',
   started_at TEXT,
   finished_at TEXT,
@@ -48,7 +51,23 @@ CREATE TABLE IF NOT EXISTS volume_reports (
   before_bytes INTEGER NOT NULL,
   after_bytes INTEGER NOT NULL,
   file_count INTEGER NOT NULL,
+  ruler_source TEXT NOT NULL DEFAULT '',
+  mount_dir TEXT NOT NULL DEFAULT '',
+  mount_fingerprint TEXT NOT NULL DEFAULT '',
+  aligned INTEGER NOT NULL DEFAULT 0,
   summary TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 旁路压实账册：计划凭证表，plan_id 唯一，记录挂载指纹与总字节
+CREATE TABLE IF NOT EXISTS volume_ruler_vouchers (
+  plan_id INTEGER PRIMARY KEY REFERENCES compact_plans(id),
+  plan_code TEXT NOT NULL,
+  mount_dir TEXT NOT NULL,
+  total_bytes INTEGER NOT NULL,
+  file_count INTEGER NOT NULL,
+  mount_fingerprint TEXT NOT NULL,
+  ruler_source TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

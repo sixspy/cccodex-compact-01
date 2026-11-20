@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.db import get_db
+from app.services import rulers
 from app.services.errors import ServiceError
 
 
@@ -14,7 +15,12 @@ def list_plans(db_path: str | None = None) -> list[dict]:
             " JOIN lake_files f ON f.id=i.file_id WHERE i.plan_id=p.id) AS plan_bytes "
             "FROM compact_plans p ORDER BY p.id"
         ).fetchall()
-        return [dict(r) for r in rows]
+        items = []
+        for r in rows:
+            item = dict(r)
+            item["ruler"] = rulers.plan_ruler_chip(conn, item, db_path)
+            items.append(item)
+        return items
 
 
 def create_plan(
@@ -79,27 +85,42 @@ def attach_loose_files(plan_id: int, db_path: str | None = None) -> dict:
 
 
 def publish_plan(plan_id: int, db_path: str | None = None) -> dict:
-    with get_db(db_path) as conn:
-        plan = conn.execute(
-            "SELECT * FROM compact_plans WHERE id=?", (plan_id,)
-        ).fetchone()
-        if not plan:
-            raise ServiceError("计划不存在", 404)
-        if plan["status"] != "草稿":
-            raise ServiceError("仅草稿可发布", 409)
-        n = conn.execute(
-            "SELECT COUNT(*) AS c FROM plan_items WHERE plan_id=?", (plan_id,)
-        ).fetchone()["c"]
-        if n <= 0:
-            raise ServiceError("空计划不可发布", 409)
-        conn.execute(
-            "UPDATE compact_plans SET status='已发布' WHERE id=?", (plan_id,)
-        )
-        return dict(
-            conn.execute(
+    """点亮发布：按选定标尺单次落盘，成功后计划状态置为已发布。
+
+    排他锁 + 库级唯一约束双保险，防两侧仓管同点发布双写标尺互相覆盖。
+    """
+    with rulers.publish_lock(db_path):
+        with get_db(db_path) as conn:
+            plan = conn.execute(
                 "SELECT * FROM compact_plans WHERE id=?", (plan_id,)
             ).fetchone()
-        )
+            if not plan:
+                raise ServiceError("计划不存在", 404)
+            if plan["status"] != "草稿":
+                raise ServiceError("仅草稿可发布", 409)
+            n = conn.execute(
+                "SELECT COUNT(*) AS c FROM plan_items WHERE plan_id=?",
+                (plan_id,),
+            ).fetchone()["c"]
+            if n <= 0:
+                raise ServiceError("空计划不可发布", 409)
+            source = rulers.active_source_from_conn(conn)
+            plan_dict = dict(plan)
+            # 挂载目录与标尺同源：挂载目录由目标表派生，指纹/总字节按挂载现物计算
+            mount = rulers.compute_mount(conn, plan_dict)
+            # 服务端按选定标尺单次落盘；失败抛中文说明且计划状态不变
+            ruler = rulers.write_ruler(conn, plan_dict, mount, source, db_path)
+            conn.execute(
+                "UPDATE compact_plans SET status='已发布', ruler_source=? WHERE id=?",
+                (source, plan_id),
+            )
+            out = dict(
+                conn.execute(
+                    "SELECT * FROM compact_plans WHERE id=?", (plan_id,)
+                ).fetchone()
+            )
+            out["ruler"] = ruler
+            return out
 
 
 def plan_detail(plan_id: int, db_path: str | None = None) -> dict:
@@ -109,9 +130,15 @@ def plan_detail(plan_id: int, db_path: str | None = None) -> dict:
         ).fetchone()
         if not plan:
             raise ServiceError("计划不存在", 404)
+        plan_dict = dict(plan)
         items = conn.execute(
             "SELECT f.* FROM plan_items i JOIN lake_files f ON f.id=i.file_id "
             "WHERE i.plan_id=? ORDER BY f.id",
             (plan_id,),
         ).fetchall()
-        return {"plan": dict(plan), "items": [dict(x) for x in items]}
+        chip = rulers.plan_ruler_chip(conn, plan_dict, db_path)
+        return {
+            "plan": plan_dict,
+            "items": [dict(x) for x in items],
+            "ruler": chip,
+        }
